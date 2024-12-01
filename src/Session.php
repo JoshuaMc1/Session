@@ -85,7 +85,7 @@ class Session
 
     public static function getId()
     {
-        self::getInstance()->driverInstance->getId();
+        return self::getInstance()->driverInstance->getId();
     }
 
     public static function setId($id)
@@ -105,12 +105,12 @@ class Session
 
     public static function get(string $key, $default = null)
     {
-        self::getInstance()->driverInstance->get($key, $default);
+        return self::getInstance()->driverInstance->get($key, $default);
     }
 
     public static function has(string $key)
     {
-        self::getInstance()->driverInstance->has($key);
+        return self::getInstance()->driverInstance->has($key);
     }
 
     public static function set(string $key, $value)
@@ -130,7 +130,7 @@ class Session
 
     public static function getFlash(string $key, $default = null)
     {
-        self::getInstance()->driverInstance->getFlash($key, $default);
+        return self::getInstance()->driverInstance->getFlash($key, $default);
     }
 
     public static function clear()
@@ -140,6 +140,6 @@ class Session
 
     public static function count()
     {
-        self::getInstance()->driverInstance->count();
+        return self::getInstance()->driverInstance->count();
     }
 }

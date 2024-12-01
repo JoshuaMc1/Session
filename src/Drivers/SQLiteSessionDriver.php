@@ -10,6 +10,7 @@ class SQLiteSessionDriver implements SessionInterface
     private $pdo;
     private $config;
     private $table;
+    private $cache = [];
 
     public function __construct(array $config)
     {
@@ -55,24 +56,38 @@ class SQLiteSessionDriver implements SessionInterface
 
     public function read($id)
     {
+        if (isset($this->cache[$id])) {
+            return $this->cache[$id];
+        }
+
         $stmt = $this->pdo->prepare("SELECT data FROM {$this->escapeIdentifier($this->table)} WHERE id = :id");
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        return $row ? $this->decrypt($row['data']) : '';
+        $this->cache[$id] = $row ? $this->decrypt($row['data']) : '';
+        return $this->cache[$id];
     }
 
     public function write($session_id, $session_data)
     {
-        $stmt = $this->pdo->prepare(
-            "REPLACE INTO {$this->escapeIdentifier($this->table)} (id, data, last_activity) VALUES (:id, :data, :last_activity)"
-        );
+        try {
+            $stmt = $this->pdo->prepare(
+                "REPLACE INTO {$this->escapeIdentifier($this->table)} (id, data, last_activity) VALUES (:id, :data, :last_activity)"
+            );
 
-        return $stmt->execute([
-            'id' => $session_id,
-            'data' => $this->encrypt($session_data),
-            'last_activity' => time(),
-        ]);
+            $stmt->execute([
+                'id' => $session_id,
+                'data' => $this->encrypt($session_data),
+                'last_activity' => time(),
+            ]);
+
+            $this->cache[$session_id] = $session_data;
+
+            return true;
+        } catch (\Exception $e) {
+            error_log('Session write failed: ' . $e->getMessage());
+            return false;
+        }
     }
 
     public function destroy($session_id = null)
@@ -111,7 +126,7 @@ class SQLiteSessionDriver implements SessionInterface
     public function has(string $key): bool
     {
         $this->ifNotStarted();
-        return isset($_SESSION[$key]);
+        return isset($_SESSION[$key]) || isset($_SESSION['flash'][$key]);
     }
 
     public function get(string $key, $default = null)
@@ -124,24 +139,28 @@ class SQLiteSessionDriver implements SessionInterface
     {
         $this->ifNotStarted();
         $_SESSION[$key] = $value;
+        $this->write(session_id(), session_encode());
     }
 
     public function remove(string $key)
     {
         $this->ifNotStarted();
         unset($_SESSION[$key]);
+        $this->write(session_id(), session_encode());
     }
 
     public function clear()
     {
         $this->ifNotStarted();
         $_SESSION = [];
+        $this->write(session_id(), session_encode());
     }
 
     public function flash(string $key, $value)
     {
         $this->ifNotStarted();
         $_SESSION['flash'][$key] = $value;
+        $this->write(session_id(), session_encode());
     }
 
     public function getFlash(string $key, $default = null)
@@ -149,7 +168,14 @@ class SQLiteSessionDriver implements SessionInterface
         $this->ifNotStarted();
         if (isset($_SESSION['flash'][$key])) {
             $value = $_SESSION['flash'][$key];
+
             unset($_SESSION['flash'][$key]);
+
+            if (empty($_SESSION['flash'])) {
+                unset($_SESSION['flash']);
+            }
+
+            $this->write(session_id(), session_encode());
             return $value;
         }
 
@@ -185,13 +211,43 @@ class SQLiteSessionDriver implements SessionInterface
     private function encrypt($data)
     {
         $key = $this->config['encryption_key'];
-        return openssl_encrypt($data, 'AES-256-CBC', $key, 0, $key);
+
+        if (strlen($key) !== 32) {
+            throw new \RuntimeException('Encryption key must be exactly 256 bits (32 characters).');
+        }
+
+        $cipher = 'AES-256-CBC';
+        $iv = openssl_random_pseudo_bytes(openssl_cipher_iv_length($cipher));
+
+        $encrypted = openssl_encrypt($data, $cipher, $key, 0, $iv);
+
+        if ($encrypted === false) {
+            throw new \RuntimeException('Encryption failed.');
+        }
+
+        return base64_encode($iv . '::' . $encrypted);
     }
 
     private function decrypt($data)
     {
         $key = $this->config['encryption_key'];
-        return openssl_decrypt($data, 'AES-256-CBC', $key, 0, $key);
+
+        if (strlen($key) !== 32) {
+            throw new \RuntimeException('Encryption key must be exactly 256 bits (32 characters).');
+        }
+
+        $cipher = 'AES-256-CBC';
+        $data = base64_decode($data);
+
+        [$iv, $encryptedData] = explode('::', $data, 2);
+
+        $decrypted = openssl_decrypt($encryptedData, $cipher, $key, 0, $iv);
+
+        if ($decrypted === false) {
+            throw new \RuntimeException('Decryption failed.');
+        }
+
+        return $decrypted;
     }
 
     private function ifNotStarted()
