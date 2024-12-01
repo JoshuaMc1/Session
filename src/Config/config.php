@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'driver' => 'sqlite',
+    'driver' => 'file',
     'drivers' => [
         'file' => [
             'path' => sprintf('%s/../storage/sessions', __DIR__)
