@@ -11,6 +11,22 @@ class FileSessionDriver implements SessionInterface
     public function __construct(array $config)
     {
         $this->filePath = $config['path'];
+
+        if (!file_exists($this->filePath)) {
+            mkdir($this->filePath, 0777, true);
+        }
+
+        if (!is_writable($this->filePath)) {
+            throw new \RuntimeException(sprintf('The session directory "%s" is not writable.', $this->filePath));
+        }
+
+        if (!is_readable($this->filePath)) {
+            throw new \RuntimeException(sprintf('The session directory "%s" is not readable.', $this->filePath));
+        }
+
+        if (!is_dir($this->filePath)) {
+            throw new \RuntimeException(sprintf('The session directory "%s" is not a directory.', $this->filePath));
+        }
     }
 
     public function start()
@@ -53,41 +69,49 @@ class FileSessionDriver implements SessionInterface
 
     public function has(string $key): bool
     {
+        $this->ifNotStarted();
         return isset($_SESSION[$key]);
     }
 
     public function get(string $key, $default = null): mixed
     {
+        $this->ifNotStarted();
         return $_SESSION[$key] ?? $default;
     }
 
     public function set(string $key, $value): void
     {
+        $this->ifNotStarted();
         $_SESSION[$key] = $value;
     }
 
     public function remove(string $key): void
     {
+        $this->ifNotStarted();
         unset($_SESSION[$key]);
     }
 
     public function clear(): void
     {
+        $this->ifNotStarted();
         $_SESSION = [];
     }
 
     public function count(): int
     {
+        $this->ifNotStarted();
         return count($_SESSION);
     }
 
     public function flash(string $key, $value)
     {
+        $this->ifNotStarted();
         $_SESSION['flash'][$key] = $value;
     }
 
     public function getFlash(string $key, $default = null)
     {
+        $this->ifNotStarted();
         if (isset($_SESSION['flash'][$key])) {
             $value = $_SESSION['flash'][$key];
             unset($_SESSION['flash'][$key]);
@@ -95,5 +119,12 @@ class FileSessionDriver implements SessionInterface
         }
 
         return $default;
+    }
+
+    private function ifNotStarted()
+    {
+        if (!isset($_SESSION)) {
+            $this->start();
+        }
     }
 }
