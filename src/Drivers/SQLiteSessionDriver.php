@@ -110,36 +110,43 @@ class SQLiteSessionDriver implements SessionInterface
 
     public function has(string $key): bool
     {
+        $this->ifNotStarted();
         return isset($_SESSION[$key]);
     }
 
     public function get(string $key, $default = null)
     {
+        $this->ifNotStarted();
         return $_SESSION[$key] ?? $default;
     }
 
     public function set(string $key, $value)
     {
+        $this->ifNotStarted();
         $_SESSION[$key] = $value;
     }
 
     public function remove(string $key)
     {
+        $this->ifNotStarted();
         unset($_SESSION[$key]);
     }
 
     public function clear()
     {
+        $this->ifNotStarted();
         $_SESSION = [];
     }
 
     public function flash(string $key, $value)
     {
+        $this->ifNotStarted();
         $_SESSION['flash'][$key] = $value;
     }
 
     public function getFlash(string $key, $default = null)
     {
+        $this->ifNotStarted();
         if (isset($_SESSION['flash'][$key])) {
             $value = $_SESSION['flash'][$key];
             unset($_SESSION['flash'][$key]);
@@ -151,6 +158,7 @@ class SQLiteSessionDriver implements SessionInterface
 
     public function count(): int
     {
+        $this->ifNotStarted();
         return count($_SESSION);
     }
 
@@ -184,5 +192,12 @@ class SQLiteSessionDriver implements SessionInterface
     {
         $key = $this->config['encryption_key'];
         return openssl_decrypt($data, 'AES-256-CBC', $key, 0, $key);
+    }
+
+    private function ifNotStarted()
+    {
+        if (!isset($_SESSION)) {
+            $this->start();
+        }
     }
 }
