@@ -18,7 +18,7 @@ class MySQLSessionDriver implements SessionInterface
             $this->config = $config;
             $this->table = $config['table'] ?? 'sessions';
 
-            $dsn = "mysql:host={$config['host']};dbname={$config['database']}";
+            $dsn = "mysql:host={$config['host']};dbname={$config['database']};charset={$config['charset']}";
             $this->pdo = new PDO($dsn, $config['username'], $config['password']);
             $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
@@ -45,20 +45,7 @@ class MySQLSessionDriver implements SessionInterface
 
     public function open($savePath, $sessionName)
     {
-        if ($this->pdo instanceof PDO) {
-            return true;
-        }
-
-        try {
-            $dsn = "mysql:host={$this->config['host']};dbname={$this->config['database']}";
-            $this->pdo = new \PDO($dsn, $this->config['username'], $this->config['password']);
-            $this->pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
-
-            return true;
-        } catch (\PDOException $e) {
-            error_log('Failed to connect to MySQL: ' . $e->getMessage());
-            return false;
-        }
+        return $this->pdo instanceof PDO;
     }
 
     public function close()
@@ -83,15 +70,24 @@ class MySQLSessionDriver implements SessionInterface
 
     public function write($session_id, $session_data)
     {
-        $stmt = $this->pdo->prepare(
-            "REPLACE INTO {$this->escapeIdentifier($this->table)} (id, data, last_activity) VALUES (:id, :data, :last_activity)"
-        );
+        try {
+            $stmt = $this->pdo->prepare(
+                "REPLACE INTO {$this->escapeIdentifier($this->table)} (id, data, last_activity) VALUES (:id, :data, :last_activity)"
+            );
 
-        return $stmt->execute([
-            'id' => $session_id,
-            'data' => $this->encrypt($session_data),
-            'last_activity' => time(),
-        ]);
+            $stmt->execute([
+                'id' => $session_id,
+                'data' => $this->encrypt($session_data),
+                'last_activity' => time(),
+            ]);
+
+            $this->cache[$session_id] = $session_data;
+
+            return true;
+        } catch (\Exception $e) {
+            error_log('Session write failed: ' . $e->getMessage());
+            return false;
+        }
     }
 
     public function destroy($session_id = null)
@@ -130,7 +126,7 @@ class MySQLSessionDriver implements SessionInterface
     public function has(string $key): bool
     {
         $this->ifNotStarted();
-        return isset($_SESSION[$key]);
+        return isset($_SESSION[$key]) || isset($_SESSION['flash'][$key]);
     }
 
     public function get(string $key, $default = null)
@@ -143,32 +139,44 @@ class MySQLSessionDriver implements SessionInterface
     {
         $this->ifNotStarted();
         $_SESSION[$key] = $value;
+        $this->write(session_id(), session_encode());
     }
 
     public function remove(string $key)
     {
         $this->ifNotStarted();
         unset($_SESSION[$key]);
+        $this->write(session_id(), session_encode());
     }
 
     public function clear()
     {
         $this->ifNotStarted();
         $_SESSION = [];
+        $this->write(session_id(), session_encode());
     }
 
     public function flash(string $key, $value)
     {
         $this->ifNotStarted();
         $_SESSION['flash'][$key] = $value;
+        $this->write(session_id(), session_encode());
     }
 
     public function getFlash(string $key, $default = null)
     {
         $this->ifNotStarted();
+
         if (isset($_SESSION['flash'][$key])) {
             $value = $_SESSION['flash'][$key];
+
             unset($_SESSION['flash'][$key]);
+
+            if (empty($_SESSION['flash'])) {
+                unset($_SESSION['flash']);
+            }
+
+            $this->write(session_id(), session_encode());
             return $value;
         }
 
@@ -204,13 +212,43 @@ class MySQLSessionDriver implements SessionInterface
     private function encrypt($data)
     {
         $key = $this->config['encryption_key'];
-        return openssl_encrypt($data, 'AES-256-CBC', $key, 0, $key);
+
+        if (strlen($key) !== 32) {
+            throw new \RuntimeException('Encryption key must be exactly 256 bits (32 characters).');
+        }
+
+        $cipher = 'AES-256-CBC';
+        $iv = openssl_random_pseudo_bytes(openssl_cipher_iv_length($cipher));
+
+        $encrypted = openssl_encrypt($data, $cipher, $key, 0, $iv);
+
+        if ($encrypted === false) {
+            throw new \RuntimeException('Encryption failed.');
+        }
+
+        return base64_encode($iv . '::' . $encrypted);
     }
 
     private function decrypt($data)
     {
         $key = $this->config['encryption_key'];
-        return openssl_decrypt($data, 'AES-256-CBC', $key, 0, $key);
+
+        if (strlen($key) !== 32) {
+            throw new \RuntimeException('Encryption key must be exactly 256 bits (32 characters).');
+        }
+
+        $cipher = 'AES-256-CBC';
+        $data = base64_decode($data);
+
+        [$iv, $encryptedData] = explode('::', $data, 2);
+
+        $decrypted = openssl_decrypt($encryptedData, $cipher, $key, 0, $iv);
+
+        if ($decrypted === false) {
+            throw new \RuntimeException('Decryption failed.');
+        }
+
+        return $decrypted;
     }
 
     private function ifNotStarted()

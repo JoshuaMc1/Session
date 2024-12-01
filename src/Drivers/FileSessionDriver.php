@@ -70,7 +70,16 @@ class FileSessionDriver implements SessionInterface
     public function has(string $key): bool
     {
         $this->ifNotStarted();
-        return isset($_SESSION[$key]);
+
+        if (isset($_SESSION[$key])) {
+            return true;
+        }
+
+        if (isset($_SESSION['flash'][$key])) {
+            return true;
+        }
+
+        return false;
     }
 
     public function get(string $key, $default = null): mixed
@@ -112,9 +121,16 @@ class FileSessionDriver implements SessionInterface
     public function getFlash(string $key, $default = null)
     {
         $this->ifNotStarted();
+
         if (isset($_SESSION['flash'][$key])) {
             $value = $_SESSION['flash'][$key];
+
             unset($_SESSION['flash'][$key]);
+
+            if (empty($_SESSION['flash'])) {
+                unset($_SESSION['flash']);
+            }
+
             return $value;
         }
 
