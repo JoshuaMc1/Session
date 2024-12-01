@@ -1,0 +1,40 @@
+#!/usr/bin/env php
+<?php
+
+$targetDir = getcwd() . '/config';
+
+if (!file_exists($targetDir)) {
+    mkdir($targetDir);
+}
+
+$sourceFile = __DIR__ . '/src/Config/config.php';
+$targetFile = "$targetDir/session.php";
+
+if (!file_exists($targetFile)) {
+    copy($sourceFile, $targetFile);
+    echo "Configuration file created at $targetFile.\n";
+}
+
+$sessionDir = getcwd() . '/storage/sessions';
+
+if (!file_exists($sessionDir)) {
+    mkdir($sessionDir, 0777, true);
+}
+
+$gitignoreFile = "$sessionDir/.gitignore";
+
+if (!file_exists($gitignoreFile)) {
+    touch($gitignoreFile);
+
+    file_put_contents(
+        $gitignoreFile,
+        <<<'EOT'
+            *
+            !.gitignore
+        EOT
+    );
+
+    echo "Gitignore file created at $gitignoreFile.\n";
+}
+
+exit(0);
